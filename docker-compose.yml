@@ -1,0 +1,74 @@
+version: "3.8"
+
+# Optional path. If Docker isn't usable on your machine, run_local.py plus a
+# local or free-hosted Postgres does the same job with no Docker at all —
+# see README.md > "Quick start (no Docker)".
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: telecom_postgres
+    environment:
+      POSTGRES_DB: telecom
+      POSTGRES_USER: telecom
+      POSTGRES_PASSWORD: telecom
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./sql/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U telecom"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  generator:
+    build:
+      context: .
+      dockerfile: generator/Dockerfile
+    container_name: telecom_generator
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: telecom
+      POSTGRES_USER: telecom
+      POSTGRES_PASSWORD: telecom
+    # generate_alarms.py now loads into Postgres by default (previously it
+    # only wrote CSVs — this container used to exit having done nothing
+    # the rest of the stack could use).
+    command: ["python", "generator/generate_alarms.py"]
+
+  spark-job:
+    build:
+      context: .
+      dockerfile: spark/Dockerfile
+    container_name: telecom_spark
+    depends_on:
+      generator:
+        condition: service_completed_successfully
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: telecom
+      POSTGRES_USER: telecom
+      POSTGRES_PASSWORD: telecom
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: dashboard/Dockerfile
+    container_name: telecom_dashboard
+    depends_on:
+      - spark-job
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: telecom
+      POSTGRES_USER: telecom
+      POSTGRES_PASSWORD: telecom
+    ports:
+      - "8501:8501"
+
+volumes:
+  pgdata:
