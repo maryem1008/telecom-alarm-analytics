@@ -5,3 +5,5 @@ __pycache__/
 data/*.csv
 report/*.pdf
 .streamlit/secrets.toml
+
+.env
