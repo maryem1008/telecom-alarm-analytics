@@ -142,7 +142,7 @@ def compute_alarm_counts(alarms_df, run_date):
     counts = (
         alarms_df.groupBy("network_element", "severity")
         .agg(F.count("*").alias("alarm_count"))
-        .withColumn("run_date", F.lit(run_date))
+        .withColumn("run_date", F.to_date(F.lit(run_date)))
     )
     return counts
 
@@ -161,7 +161,7 @@ def compute_mttr(alarms_df, run_date):
             F.round(F.avg("resolution_minutes"), 2).alias("avg_mttr_minutes"),
             F.count("*").alias("resolved_alarms"),
         )
-        .withColumn("run_date", F.lit(run_date))
+        .withColumn("run_date", F.to_date(F.lit(run_date)))
     )
     return mttr
 
@@ -199,7 +199,7 @@ def compute_at_risk_towers(link_df, run_date):
             (F.col("avg_rx_power_dbm") < RX_POWER_THRESHOLD_DBM)
             | (F.col("avg_vswr") > VSWR_THRESHOLD),
         )
-        .withColumn("run_date", F.lit(run_date))
+        .withColumn("run_date", F.to_date(F.lit(run_date)))
     )
     return agg
 
@@ -270,7 +270,7 @@ def compute_anomalies(
             F.col("z_score"),
             F.col("is_anomaly"),
         )
-        .withColumn("run_date", F.lit(run_date))
+        .withColumn("run_date", F.to_date(F.lit(run_date)))
     )
     return result
 
@@ -316,7 +316,7 @@ def compute_incidents(alarms_df, run_date, gap_minutes=INCIDENT_GAP_MINUTES):
                 (F.col("end_time").cast("long") - F.col("start_time").cast("long")) / 60.0, 2
             ),
         )
-        .withColumn("run_date", F.lit(run_date))
+        .withColumn("run_date", F.to_date(F.lit(run_date)))
     )
     return incidents
 
