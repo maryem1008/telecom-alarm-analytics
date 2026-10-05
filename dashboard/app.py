@@ -15,7 +15,12 @@ import pydeck as pdk
 import streamlit as st
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from common.constants import NETWORK_ELEMENT_COORDS, SEVERITIES, SEVERITY_COLORS, BRAND_INK
+from common.constants import (
+    NETWORK_ELEMENT_COORDS,
+    SEVERITIES,
+    SEVERITY_COLORS,
+    BRAND_INK,
+)
 from common.db import connect
 from report.generate_report import generate_report
 
@@ -61,6 +66,7 @@ st.markdown(
         }}
 
         [data-testid="stSidebar"] {{ background-color: #f8f9fa; border-right: 1px solid #e5e7eb; }}
+        [data-testid="stSidebarNav"] {{ display: none; }}
 
         .app-header {{ display: flex; align-items: baseline; gap: 0.6rem; margin-bottom: 0.1rem; }}
         .app-header .dot {{ width: 9px; height: 9px; border-radius: 50%; background: #15803d;
@@ -110,6 +116,155 @@ if st.sidebar.button("Reset filters"):
     selected_elements = ALL_ELEMENTS
     selected_severities = ALL_SEVERITIES
     st.rerun()
+
+# --- Alarm lookup; opening an alarm reveals the engineer-only action ---
+selection_rows = run_query(
+    """
+    SELECT alarm_id, network_element, specific_problem, severity
+    FROM alarms
+    WHERE clear_time IS NULL
+      AND network_element = ANY(%(elements)s)
+      AND severity = ANY(%(severities)s)
+    ORDER BY insert_time DESC
+    LIMIT 300
+    """,
+    params={
+        "elements": list(selected_elements) or ["__none__"],
+        "severities": list(selected_severities) or ["__none__"],
+    },
+)
+st.subheader("Find an open alarm")
+if selection_rows.empty:
+    st.info("No open alarms match the current filters.")
+else:
+    selection_labels = {
+        int(row.alarm_id): (
+            f"#{int(row.alarm_id)} · {row.network_element} · "
+            f"{row.severity} · {row.specific_problem}"
+        )
+        for row in selection_rows.itertuples()
+    }
+    selected_alarm_id = st.selectbox(
+        "Search alarms by ID, element, severity, or problem",
+        options=list(selection_labels),
+        format_func=selection_labels.get,
+        key="public_remediation_alarm",
+    )
+    if st.button("Open", key="open_alarm_for_remediation"):
+        selected_alarm = selection_rows.loc[
+            selection_rows["alarm_id"] == selected_alarm_id
+        ].iloc[0]
+        st.session_state["opened_remediation_alarm"] = {
+            "alarm_id": int(selected_alarm_id),
+            "network_element": selected_alarm["network_element"],
+            "specific_problem": selected_alarm["specific_problem"],
+            "severity": selected_alarm["severity"],
+        }
+
+opened_alarm = st.session_state.get("opened_remediation_alarm")
+if opened_alarm:
+    alarm_detail = run_query(
+        """
+        SELECT alarm_id, network_element, alarming_object, specific_problem,
+               severity, event_time, insert_time, clear_time
+        FROM alarms
+        WHERE alarm_id = %(alarm_id)s
+          AND clear_time IS NULL
+        """,
+        params={"alarm_id": opened_alarm["alarm_id"]},
+    )
+    if alarm_detail.empty:
+        st.warning("Alarm details are currently unavailable.")
+    else:
+        detail = alarm_detail.iloc[0]
+        element = detail["network_element"]
+        latitude, longitude = NETWORK_ELEMENT_COORDS.get(
+            element, (None, None)
+        )
+        st.markdown(f"### Alarm #{int(detail['alarm_id'])} details")
+        location_col, alarm_col, status_col = st.columns(3)
+        with location_col:
+            st.markdown("**Site location**")
+            st.write(f"Network element: {element}")
+            site_object = detail["alarming_object"] or "Not recorded"
+            st.write(f"Site object: {site_object}")
+            if latitude is not None and longitude is not None:
+                st.write(
+                    f"Approx. coordinates: {latitude:.4f}, {longitude:.4f}"
+                )
+                st.link_button(
+                    "View site on map",
+                    f"https://www.google.com/maps?q={latitude},{longitude}",
+                )
+        with alarm_col:
+            st.markdown("**Alarm information**")
+            problem = detail["specific_problem"] or "Not recorded"
+            st.write(f"Problem: {problem}")
+            st.write(f"Severity: {detail['severity']}")
+            st.write(f"Started: {detail['event_time']}")
+            st.write(f"Received: {detail['insert_time']}")
+        with status_col:
+            st.markdown("**Latest link reading**")
+            link_reading = run_query(
+                """
+                SELECT sector, rx_power_dbm, tx_power_dbm, vswr,
+                       connected_ues, reading_time
+                FROM link_quality
+                WHERE network_element = %(element)s
+                ORDER BY reading_time DESC
+                LIMIT 1
+                """,
+                params={"element": element},
+            )
+            if link_reading.empty:
+                st.write("No link-quality readings recorded.")
+            else:
+                reading = link_reading.iloc[0]
+                st.write(f"Sector: {reading['sector'] or 'Not recorded'}")
+                st.write(f"Rx power: {reading['rx_power_dbm']} dBm")
+                st.write(f"Tx power: {reading['tx_power_dbm']} dBm")
+                st.write(f"VSWR: {reading['vswr']}")
+                st.write(f"Connected UEs: {reading['connected_ues']}")
+                st.caption(f"Reading time: {reading['reading_time']}")
+
+        same_alarm = run_query(
+            """
+            SELECT alarm_id, severity, event_time, insert_time, clear_time
+            FROM alarms
+            WHERE network_element = %(element)s
+              AND specific_problem = %(problem)s
+              AND alarm_id <> %(alarm_id)s
+            ORDER BY event_time DESC
+            LIMIT 1
+            """,
+            params={
+                "element": element,
+                "problem": detail["specific_problem"],
+                "alarm_id": int(detail["alarm_id"]),
+            },
+        )
+        st.markdown("**Most recent matching alarm**")
+        if same_alarm.empty:
+            st.write(
+                "No previous alarm of this type is recorded for this site."
+            )
+        else:
+            previous = same_alarm.iloc[0]
+            previous_status = (
+                "Open" if pd.isna(previous["clear_time"]) else "Cleared"
+            )
+            st.write(
+                f"Alarm #{int(previous['alarm_id'])} · "
+                f"{previous['severity']} · "
+                f"occurred {previous['event_time']} · {previous_status}"
+            )
+
+    st.caption(
+        "Engineer login required to continue. All actions are simulated."
+    )
+    if st.button("Remediate", key="remediate_opened_alarm"):
+        st.session_state["remediation_selection"] = opened_alarm
+        st.switch_page("pages/2_Remediation.py")
 
 # psycopg2/pandas can't parameterize a variable-length IN (...) list
 # directly, so build a tuple and use `= ANY(%s)` instead — no string
