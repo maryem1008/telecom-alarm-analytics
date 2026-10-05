@@ -15,14 +15,14 @@ import pydeck as pdk
 import streamlit as st
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from common.constants import (
+from common.constants import (  # noqa: E402
     NETWORK_ELEMENT_COORDS,
     SEVERITIES,
     SEVERITY_COLORS,
     BRAND_INK,
 )
-from common.db import connect
-from report.generate_report import generate_report
+from common.db import connect  # noqa: E402
+from report.generate_report import generate_report  # noqa: E402
 
 ALL_ELEMENTS = list(NETWORK_ELEMENT_COORDS.keys())
 ALL_SEVERITIES = SEVERITIES
@@ -279,7 +279,13 @@ report_col1, report_col2 = st.columns([1, 4])
 with report_col1:
     if st.button("Generate PDF report", key="generate_report_btn"):
         with st.spinner("Generating report..."):
-            path = generate_report(os.path.join(os.path.dirname(__file__), "..", "report", "telecom_report.pdf"))
+            report_path = os.path.join(
+                os.path.dirname(__file__),
+                "..",
+                "report",
+                "telecom_report.pdf",
+            )
+            path = generate_report(report_path)
             with open(path, "rb") as f:
                 st.session_state["report_bytes"] = f.read()
         st.success("Report ready.")
@@ -361,17 +367,29 @@ def timeseries_section():
                 y=alt.Y("count:Q", title="Alarms"),
                 color=alt.Color(
                     "severity:N", title="Severity",
-                    scale=alt.Scale(domain=list(SEVERITY_COLORS.keys()), range=list(SEVERITY_COLORS.values())),
+                    scale=alt.Scale(
+                        domain=list(SEVERITY_COLORS.keys()),
+                        range=list(SEVERITY_COLORS.values()),
+                    ),
                 ),
                 tooltip=["minute:T", "severity:N", "count:Q"],
             )
             .properties(height=280)
             .configure_view(strokeWidth=0)
-            .configure_axis(gridColor="#f0f0f0", domainColor="#e5e7eb", labelColor="#6b7280", titleColor="#6b7280")
+            .configure_axis(
+                gridColor="#f0f0f0",
+                domainColor="#e5e7eb",
+                labelColor="#6b7280",
+                titleColor="#6b7280",
+            )
         )
         st.altair_chart(line_chart, use_container_width=True)
     else:
-        st.info("No data for the current filter selection in this window. Run generator/stream_alarms.py alongside this dashboard for a live feed.")
+        st.info(
+            "No data for the current filter selection in this window. "
+            "Run generator/stream_alarms.py alongside this dashboard for a "
+            "live feed."
+        )
 
 
 timeseries_section()
@@ -441,7 +459,13 @@ def map_section():
         map_style=None,
         layers=[layer],
         initial_view_state=st.session_state["map_view_state"],
-        tooltip={"text": "{network_element}\nOpen Critical: {critical_count}  Major: {major_count}  Minor: {minor_count}\nTotal open: {total_open}\nSpark at-risk: {risk_flag}"},
+        tooltip={
+            "text": (
+                "{network_element}\nOpen Critical: {critical_count}  "
+                "Major: {major_count}  Minor: {minor_count}\n"
+                "Total open: {total_open}\nSpark at-risk: {risk_flag}"
+            )
+        },
     ))
     st.caption("🔴 Open Critical or Spark at-risk   🟠 Open Major   🟡 Open Minor   🟢 All clear")
 
@@ -490,7 +514,11 @@ st.divider()
 @st.fragment(run_every="15s")
 def incidents_section():
     st.subheader("Incident timeline — related alarms grouped together")
-    st.caption("Alarms from the same element within a 2-minute window are grouped into a single incident, so a cascading failure shows as one event, not many.")
+    st.caption(
+        "Alarms from the same element within a 2-minute window are grouped "
+        "into a single incident, so a cascading failure shows as one event, "
+        "not many."
+    )
 
     df_incidents = run_query(
         """
@@ -538,11 +566,19 @@ def aggregates_section():
                     y=alt.Y("total", title="Alarms"),
                     color=alt.Color(
                         "severity:N", legend=None,
-                        scale=alt.Scale(domain=list(SEVERITY_COLORS.keys()), range=list(SEVERITY_COLORS.values())),
+                        scale=alt.Scale(
+                            domain=list(SEVERITY_COLORS.keys()),
+                            range=list(SEVERITY_COLORS.values()),
+                        ),
                     ),
                 )
                 .configure_view(strokeWidth=0)
-                .configure_axis(gridColor="#f0f0f0", domainColor="#e5e7eb", labelColor="#6b7280", titleColor="#6b7280")
+                .configure_axis(
+                    gridColor="#f0f0f0",
+                    domainColor="#e5e7eb",
+                    labelColor="#6b7280",
+                    titleColor="#6b7280",
+                )
             )
             st.altair_chart(chart, use_container_width=True)
         else:
@@ -564,9 +600,17 @@ def aggregates_section():
         if not df_top.empty:
             chart2 = (
                 alt.Chart(df_top).mark_bar(color=BRAND_INK)
-                .encode(x=alt.X("total_alarms", title="Alarms"), y=alt.Y("network_element", sort="-x", title=None))
+                .encode(
+                    x=alt.X("total_alarms", title="Alarms"),
+                    y=alt.Y("network_element", sort="-x", title=None),
+                )
                 .configure_view(strokeWidth=0)
-                .configure_axis(gridColor="#f0f0f0", domainColor="#e5e7eb", labelColor="#6b7280", titleColor="#6b7280")
+                .configure_axis(
+                    gridColor="#f0f0f0",
+                    domainColor="#e5e7eb",
+                    labelColor="#6b7280",
+                    titleColor="#6b7280",
+                )
             )
             st.altair_chart(chart2, use_container_width=True)
         else:

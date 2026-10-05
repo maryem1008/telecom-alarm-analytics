@@ -82,10 +82,14 @@ class SimulatedExecutor:
         if not runbook["remote"]:
             raise ValueError("Non-remote alarms must use a dispatch ticket")
         commands = render_commands(runbook, network_element, params)
+        output = (
+            "DRY RUN — no commands executed:\n"
+            + "\n".join(commands)
+        )
         return ExecutionResult(
             True,
-            "DRY RUN — no commands executed:\n" +
-            "\n".join(commands))
+            output,
+        )
 
     def execute(
         self,

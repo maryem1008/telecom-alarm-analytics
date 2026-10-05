@@ -32,12 +32,12 @@ from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from common.constants import (
+from common.constants import (  # noqa: E402
     SEVERITY_WEIGHT, RX_POWER_THRESHOLD_DBM, VSWR_THRESHOLD,
     INCIDENT_GAP_MINUTES, ANOMALY_Z_THRESHOLD, ANOMALY_BUCKET_MINUTES,
     ANOMALY_LOOKBACK_HOURS,
 )
-from common.db import jdbc_url_and_props
+from common.db import jdbc_url_and_props  # noqa: E402
 
 STREAM_INTERVAL_SECONDS = int(os.environ.get("STREAM_INTERVAL_SECONDS", 30))
 
@@ -74,8 +74,12 @@ def find_java_home():
             return str(candidate)
 
     def _scan(root_pattern):
-        for bin_java in glob.glob(os.path.join(root_pattern, "*", "bin", "java")) + \
-                         glob.glob(os.path.join(root_pattern, "*", "bin", "java.exe")):
+        java_paths = glob.glob(
+            os.path.join(root_pattern, "*", "bin", "java")
+        ) + glob.glob(
+            os.path.join(root_pattern, "*", "bin", "java.exe")
+        )
+        for bin_java in java_paths:
             return str(Path(bin_java).parent.parent)
         return None
 
@@ -254,8 +258,11 @@ def compute_anomalies(
         latest
         .withColumn(
             "stddev_count",
-            F.when(F.col("stddev_count").isNull() | (F.col("stddev_count") == 0), F.lit(1.0))
-             .otherwise(F.col("stddev_count")),
+            F.when(
+                F.col("stddev_count").isNull()
+                | (F.col("stddev_count") == 0),
+                F.lit(1.0),
+            ).otherwise(F.col("stddev_count")),
         )
         .withColumn(
             "z_score",
@@ -372,7 +379,12 @@ def build_spark_session():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--once", action="store_true", help="Run a single pass and exit, instead of looping.")
-    parser.add_argument("--interval", type=int, default=STREAM_INTERVAL_SECONDS, help="Seconds between refreshes when looping.")
+    parser.add_argument(
+        "--interval",
+        type=int,
+        default=STREAM_INTERVAL_SECONDS,
+        help="Seconds between refreshes when looping.",
+    )
     args = parser.parse_args()
 
     spark = build_spark_session()

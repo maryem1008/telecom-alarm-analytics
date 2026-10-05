@@ -26,11 +26,11 @@ import sys
 from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from common.constants import (
+from common.constants import (  # noqa: E402
     NETWORK_ELEMENTS, PROBLEM_ELEMENTS, SEVERITIES, SEVERITY_WEIGHTS_NORMAL,
     SEVERITY_WEIGHTS_PROBLEM, SPECIFIC_PROBLEMS, SECTORS,
 )
-from common.db import connect
+from common.db import connect  # noqa: E402
 
 random.seed(42)
 
