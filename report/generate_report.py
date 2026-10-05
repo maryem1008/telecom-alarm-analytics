@@ -26,8 +26,12 @@ from reportlab.platypus import (
 )
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from common.constants import BRAND_INK, RX_POWER_THRESHOLD_DBM, VSWR_THRESHOLD
-from common.db import connect
+from common.constants import (  # noqa: E402
+    BRAND_INK,
+    RX_POWER_THRESHOLD_DBM,
+    VSWR_THRESHOLD,
+)
+from common.db import connect  # noqa: E402
 
 
 def fetch_summary(cur):
@@ -130,8 +134,17 @@ def generate_report(output_path="report/telecom_report.pdf"):
     conn.close()
 
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle("TitleCustom", parent=styles["Title"], textColor=colors.HexColor(BRAND_INK))
-    h2_style = ParagraphStyle("H2Custom", parent=styles["Heading2"], textColor=colors.HexColor(BRAND_INK), spaceBefore=14)
+    title_style = ParagraphStyle(
+        "TitleCustom",
+        parent=styles["Title"],
+        textColor=colors.HexColor(BRAND_INK),
+    )
+    h2_style = ParagraphStyle(
+        "H2Custom",
+        parent=styles["Heading2"],
+        textColor=colors.HexColor(BRAND_INK),
+        spaceBefore=14,
+    )
     body_style = styles["BodyText"]
 
     doc = SimpleDocTemplate(

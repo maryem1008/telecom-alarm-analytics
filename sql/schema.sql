@@ -85,3 +85,39 @@ CREATE INDEX IF NOT EXISTS idx_alarms_element ON alarms(network_element);
 CREATE INDEX IF NOT EXISTS idx_alarms_severity ON alarms(severity);
 CREATE INDEX IF NOT EXISTS idx_alarms_insert_time ON alarms(insert_time);
 CREATE INDEX IF NOT EXISTS idx_link_element ON link_quality(network_element);
+
+CREATE TABLE IF NOT EXISTS users (
+    user_id          SERIAL PRIMARY KEY,
+    username         VARCHAR(100) UNIQUE NOT NULL,
+    password_hash    VARCHAR(100) NOT NULL,
+    role             VARCHAR(20) NOT NULL CHECK (role = 'engineer'),
+    failed_attempts  INTEGER DEFAULT 0,
+    locked_until     TIMESTAMP NULL,
+    created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS remediation_actions (
+    action_id         SERIAL PRIMARY KEY,
+    alarm_id          INTEGER,
+    network_element   VARCHAR(100),
+    username          VARCHAR(100),
+    runbook_id        VARCHAR(100),
+    params            JSONB,
+    ai_suggested      BOOLEAN DEFAULT FALSE,
+    mode              VARCHAR(20) NOT NULL CHECK (mode IN ('dry_run','execute','rollback')),
+    status            VARCHAR(30),
+    output            TEXT,
+    started_at        TIMESTAMP,
+    finished_at       TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS dispatch_tickets (
+    ticket_id         SERIAL PRIMARY KEY,
+    alarm_id          INTEGER,
+    network_element   VARCHAR(100),
+    reason            TEXT,
+    status            VARCHAR(30) DEFAULT 'open',
+    created_by        VARCHAR(100),
+    created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    closed_at         TIMESTAMP NULL
+);

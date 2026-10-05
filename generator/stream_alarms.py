@@ -24,11 +24,11 @@ import time
 from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from common.constants import (
+from common.constants import (  # noqa: E402
     NETWORK_ELEMENTS, PROBLEM_ELEMENTS, SEVERITIES, SEVERITY_WEIGHTS_NORMAL,
     SEVERITY_WEIGHTS_PROBLEM, SPECIFIC_PROBLEMS, SECTORS,
 )
-from common.db import connect
+from common.db import connect  # noqa: E402
 
 random.seed()
 
@@ -113,7 +113,11 @@ def run_burst(cur, conn):
     end_time = time.time() + BURST_DURATION_SECONDS
     count = 0
     while time.time() < end_time:
-        element, severity, now = insert_alarm(cur, forced_element=target, forced_severity=random.choice(["Critical", "Major"]))
+        element, severity, now = insert_alarm(
+            cur,
+            forced_element=target,
+            forced_severity=random.choice(["Critical", "Major"]),
+        )
         conn.commit()
         count += 1
         print(f"[{now:%H:%M:%S}] BURST ALARM  {severity:8s} {element}")
@@ -128,13 +132,19 @@ def main():
     cur = conn.cursor()
     print("Streaming alarms + link quality data... Ctrl+C to stop.")
 
-    next_burst_at = time.time() + random.uniform(BURST_MIN_INTERVAL_SECONDS, BURST_MAX_INTERVAL_SECONDS)
+    next_burst_at = time.time() + random.uniform(
+        BURST_MIN_INTERVAL_SECONDS,
+        BURST_MAX_INTERVAL_SECONDS,
+    )
 
     try:
         while True:
             if time.time() >= next_burst_at:
                 run_burst(cur, conn)
-                next_burst_at = time.time() + random.uniform(BURST_MIN_INTERVAL_SECONDS, BURST_MAX_INTERVAL_SECONDS)
+                next_burst_at = time.time() + random.uniform(
+                    BURST_MIN_INTERVAL_SECONDS,
+                    BURST_MAX_INTERVAL_SECONDS,
+                )
                 continue  # skip the normal tick right after a burst
 
             element, severity, now = insert_alarm(cur)

@@ -15,9 +15,14 @@ import pydeck as pdk
 import streamlit as st
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from common.constants import NETWORK_ELEMENT_COORDS, SEVERITIES, SEVERITY_COLORS, BRAND_INK
-from common.db import connect
-from report.generate_report import generate_report
+from common.constants import (  # noqa: E402
+    NETWORK_ELEMENT_COORDS,
+    SEVERITIES,
+    SEVERITY_COLORS,
+    BRAND_INK,
+)
+from common.db import connect  # noqa: E402
+from report.generate_report import generate_report  # noqa: E402
 
 ALL_ELEMENTS = list(NETWORK_ELEMENT_COORDS.keys())
 ALL_SEVERITIES = SEVERITIES
@@ -61,6 +66,7 @@ st.markdown(
         }}
 
         [data-testid="stSidebar"] {{ background-color: #f8f9fa; border-right: 1px solid #e5e7eb; }}
+        [data-testid="stSidebarNav"] {{ display: none; }}
 
         .app-header {{ display: flex; align-items: baseline; gap: 0.6rem; margin-bottom: 0.1rem; }}
         .app-header .dot {{ width: 9px; height: 9px; border-radius: 50%; background: #15803d;
@@ -111,6 +117,155 @@ if st.sidebar.button("Reset filters"):
     selected_severities = ALL_SEVERITIES
     st.rerun()
 
+# --- Alarm lookup; opening an alarm reveals the engineer-only action ---
+selection_rows = run_query(
+    """
+    SELECT alarm_id, network_element, specific_problem, severity
+    FROM alarms
+    WHERE clear_time IS NULL
+      AND network_element = ANY(%(elements)s)
+      AND severity = ANY(%(severities)s)
+    ORDER BY insert_time DESC
+    LIMIT 300
+    """,
+    params={
+        "elements": list(selected_elements) or ["__none__"],
+        "severities": list(selected_severities) or ["__none__"],
+    },
+)
+st.subheader("Find an open alarm")
+if selection_rows.empty:
+    st.info("No open alarms match the current filters.")
+else:
+    selection_labels = {
+        int(row.alarm_id): (
+            f"#{int(row.alarm_id)} · {row.network_element} · "
+            f"{row.severity} · {row.specific_problem}"
+        )
+        for row in selection_rows.itertuples()
+    }
+    selected_alarm_id = st.selectbox(
+        "Search alarms by ID, element, severity, or problem",
+        options=list(selection_labels),
+        format_func=selection_labels.get,
+        key="public_remediation_alarm",
+    )
+    if st.button("Open", key="open_alarm_for_remediation"):
+        selected_alarm = selection_rows.loc[
+            selection_rows["alarm_id"] == selected_alarm_id
+        ].iloc[0]
+        st.session_state["opened_remediation_alarm"] = {
+            "alarm_id": int(selected_alarm_id),
+            "network_element": selected_alarm["network_element"],
+            "specific_problem": selected_alarm["specific_problem"],
+            "severity": selected_alarm["severity"],
+        }
+
+opened_alarm = st.session_state.get("opened_remediation_alarm")
+if opened_alarm:
+    alarm_detail = run_query(
+        """
+        SELECT alarm_id, network_element, alarming_object, specific_problem,
+               severity, event_time, insert_time, clear_time
+        FROM alarms
+        WHERE alarm_id = %(alarm_id)s
+          AND clear_time IS NULL
+        """,
+        params={"alarm_id": opened_alarm["alarm_id"]},
+    )
+    if alarm_detail.empty:
+        st.warning("Alarm details are currently unavailable.")
+    else:
+        detail = alarm_detail.iloc[0]
+        element = detail["network_element"]
+        latitude, longitude = NETWORK_ELEMENT_COORDS.get(
+            element, (None, None)
+        )
+        st.markdown(f"### Alarm #{int(detail['alarm_id'])} details")
+        location_col, alarm_col, status_col = st.columns(3)
+        with location_col:
+            st.markdown("**Site location**")
+            st.write(f"Network element: {element}")
+            site_object = detail["alarming_object"] or "Not recorded"
+            st.write(f"Site object: {site_object}")
+            if latitude is not None and longitude is not None:
+                st.write(
+                    f"Approx. coordinates: {latitude:.4f}, {longitude:.4f}"
+                )
+                st.link_button(
+                    "View site on map",
+                    f"https://www.google.com/maps?q={latitude},{longitude}",
+                )
+        with alarm_col:
+            st.markdown("**Alarm information**")
+            problem = detail["specific_problem"] or "Not recorded"
+            st.write(f"Problem: {problem}")
+            st.write(f"Severity: {detail['severity']}")
+            st.write(f"Started: {detail['event_time']}")
+            st.write(f"Received: {detail['insert_time']}")
+        with status_col:
+            st.markdown("**Latest link reading**")
+            link_reading = run_query(
+                """
+                SELECT sector, rx_power_dbm, tx_power_dbm, vswr,
+                       connected_ues, reading_time
+                FROM link_quality
+                WHERE network_element = %(element)s
+                ORDER BY reading_time DESC
+                LIMIT 1
+                """,
+                params={"element": element},
+            )
+            if link_reading.empty:
+                st.write("No link-quality readings recorded.")
+            else:
+                reading = link_reading.iloc[0]
+                st.write(f"Sector: {reading['sector'] or 'Not recorded'}")
+                st.write(f"Rx power: {reading['rx_power_dbm']} dBm")
+                st.write(f"Tx power: {reading['tx_power_dbm']} dBm")
+                st.write(f"VSWR: {reading['vswr']}")
+                st.write(f"Connected UEs: {reading['connected_ues']}")
+                st.caption(f"Reading time: {reading['reading_time']}")
+
+        same_alarm = run_query(
+            """
+            SELECT alarm_id, severity, event_time, insert_time, clear_time
+            FROM alarms
+            WHERE network_element = %(element)s
+              AND specific_problem = %(problem)s
+              AND alarm_id <> %(alarm_id)s
+            ORDER BY event_time DESC
+            LIMIT 1
+            """,
+            params={
+                "element": element,
+                "problem": detail["specific_problem"],
+                "alarm_id": int(detail["alarm_id"]),
+            },
+        )
+        st.markdown("**Most recent matching alarm**")
+        if same_alarm.empty:
+            st.write(
+                "No previous alarm of this type is recorded for this site."
+            )
+        else:
+            previous = same_alarm.iloc[0]
+            previous_status = (
+                "Open" if pd.isna(previous["clear_time"]) else "Cleared"
+            )
+            st.write(
+                f"Alarm #{int(previous['alarm_id'])} · "
+                f"{previous['severity']} · "
+                f"occurred {previous['event_time']} · {previous_status}"
+            )
+
+    st.caption(
+        "Engineer login required to continue. All actions are simulated."
+    )
+    if st.button("Remediate", key="remediate_opened_alarm"):
+        st.session_state["remediation_selection"] = opened_alarm
+        st.switch_page("pages/2_Remediation.py")
+
 # psycopg2/pandas can't parameterize a variable-length IN (...) list
 # directly, so build a tuple and use `= ANY(%s)` instead — no string
 # interpolation of user-controlled values into SQL.
@@ -124,7 +279,13 @@ report_col1, report_col2 = st.columns([1, 4])
 with report_col1:
     if st.button("Generate PDF report", key="generate_report_btn"):
         with st.spinner("Generating report..."):
-            path = generate_report(os.path.join(os.path.dirname(__file__), "..", "report", "telecom_report.pdf"))
+            report_path = os.path.join(
+                os.path.dirname(__file__),
+                "..",
+                "report",
+                "telecom_report.pdf",
+            )
+            path = generate_report(report_path)
             with open(path, "rb") as f:
                 st.session_state["report_bytes"] = f.read()
         st.success("Report ready.")
@@ -206,17 +367,29 @@ def timeseries_section():
                 y=alt.Y("count:Q", title="Alarms"),
                 color=alt.Color(
                     "severity:N", title="Severity",
-                    scale=alt.Scale(domain=list(SEVERITY_COLORS.keys()), range=list(SEVERITY_COLORS.values())),
+                    scale=alt.Scale(
+                        domain=list(SEVERITY_COLORS.keys()),
+                        range=list(SEVERITY_COLORS.values()),
+                    ),
                 ),
                 tooltip=["minute:T", "severity:N", "count:Q"],
             )
             .properties(height=280)
             .configure_view(strokeWidth=0)
-            .configure_axis(gridColor="#f0f0f0", domainColor="#e5e7eb", labelColor="#6b7280", titleColor="#6b7280")
+            .configure_axis(
+                gridColor="#f0f0f0",
+                domainColor="#e5e7eb",
+                labelColor="#6b7280",
+                titleColor="#6b7280",
+            )
         )
         st.altair_chart(line_chart, use_container_width=True)
     else:
-        st.info("No data for the current filter selection in this window. Run generator/stream_alarms.py alongside this dashboard for a live feed.")
+        st.info(
+            "No data for the current filter selection in this window. "
+            "Run generator/stream_alarms.py alongside this dashboard for a "
+            "live feed."
+        )
 
 
 timeseries_section()
@@ -286,7 +459,13 @@ def map_section():
         map_style=None,
         layers=[layer],
         initial_view_state=st.session_state["map_view_state"],
-        tooltip={"text": "{network_element}\nOpen Critical: {critical_count}  Major: {major_count}  Minor: {minor_count}\nTotal open: {total_open}\nSpark at-risk: {risk_flag}"},
+        tooltip={
+            "text": (
+                "{network_element}\nOpen Critical: {critical_count}  "
+                "Major: {major_count}  Minor: {minor_count}\n"
+                "Total open: {total_open}\nSpark at-risk: {risk_flag}"
+            )
+        },
     ))
     st.caption("🔴 Open Critical or Spark at-risk   🟠 Open Major   🟡 Open Minor   🟢 All clear")
 
@@ -335,7 +514,11 @@ st.divider()
 @st.fragment(run_every="15s")
 def incidents_section():
     st.subheader("Incident timeline — related alarms grouped together")
-    st.caption("Alarms from the same element within a 2-minute window are grouped into a single incident, so a cascading failure shows as one event, not many.")
+    st.caption(
+        "Alarms from the same element within a 2-minute window are grouped "
+        "into a single incident, so a cascading failure shows as one event, "
+        "not many."
+    )
 
     df_incidents = run_query(
         """
@@ -383,11 +566,19 @@ def aggregates_section():
                     y=alt.Y("total", title="Alarms"),
                     color=alt.Color(
                         "severity:N", legend=None,
-                        scale=alt.Scale(domain=list(SEVERITY_COLORS.keys()), range=list(SEVERITY_COLORS.values())),
+                        scale=alt.Scale(
+                            domain=list(SEVERITY_COLORS.keys()),
+                            range=list(SEVERITY_COLORS.values()),
+                        ),
                     ),
                 )
                 .configure_view(strokeWidth=0)
-                .configure_axis(gridColor="#f0f0f0", domainColor="#e5e7eb", labelColor="#6b7280", titleColor="#6b7280")
+                .configure_axis(
+                    gridColor="#f0f0f0",
+                    domainColor="#e5e7eb",
+                    labelColor="#6b7280",
+                    titleColor="#6b7280",
+                )
             )
             st.altair_chart(chart, use_container_width=True)
         else:
@@ -409,9 +600,17 @@ def aggregates_section():
         if not df_top.empty:
             chart2 = (
                 alt.Chart(df_top).mark_bar(color=BRAND_INK)
-                .encode(x=alt.X("total_alarms", title="Alarms"), y=alt.Y("network_element", sort="-x", title=None))
+                .encode(
+                    x=alt.X("total_alarms", title="Alarms"),
+                    y=alt.Y("network_element", sort="-x", title=None),
+                )
                 .configure_view(strokeWidth=0)
-                .configure_axis(gridColor="#f0f0f0", domainColor="#e5e7eb", labelColor="#6b7280", titleColor="#6b7280")
+                .configure_axis(
+                    gridColor="#f0f0f0",
+                    domainColor="#e5e7eb",
+                    labelColor="#6b7280",
+                    titleColor="#6b7280",
+                )
             )
             st.altair_chart(chart2, use_container_width=True)
         else:
